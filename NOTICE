@@ -1,0 +1,25 @@
+W System e-invoice validator (free edition)
+Copyright 2026 W System
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product bundles or downloads at build time third-party rule artefacts that are NOT covered by the Apache-2.0
+licence of W System's code and are distributed unmodified under their own licences:
+
+- CEN/TC 434 EN 16931 validation artefacts (Schematron/XSLT), version 1.3.16, (c) CEN, reproduced with permission
+  from CEN, licensed under the European Union Public Licence (EUPL) v1.2. Source:
+  https://github.com/ConnectingEurope/eInvoicing-EN16931 . Licence text: licenses/EUPL-1.2_CEN-EN16931.txt.
+  These files are used unmodified; if you modify them you must release the modified files under EUPL-1.2.
+- KoSIT XRechnung validator configuration 3.0.2 (release 2026-08-31) and XRechnung Schematron, (c) Koordinierungsstelle
+  fuer IT-Standards (KoSIT), Apache-2.0. Source: https://github.com/itplr-kosit/validator-configuration-xrechnung .
+  Licence text: licenses/Apache-2.0_KoSIT-XRechnung-config.txt.
+- Saxon-HE via saxonche, (c) Saxonica Ltd, Mozilla Public License 2.0. Source: https://www.saxonica.com/ .
+  Licence text: licenses/MPL-2.0_Saxon-HE.txt.
+- Sample invoices in fixtures/ from the Mustang project (Apache-2.0, https://github.com/ZUGFeRD/mustangproject) and the
+  KoSIT XRechnung test suite (Apache-2.0, https://github.com/itplr-kosit/xrechnung-testsuite); some invalid samples
+  are W System modifications of those files.
+
+Peppol BIS Billing 3.0 rules (OpenPeppol) are NOT included.
+
+Disclaimer: this is a technical check against the official EN 16931 / XRechnung rule sets. A technically valid file
+is not tax or legal advice.

@@ -1,0 +1,45 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install lxml==6.1.3 saxonche==13.1.1 pypdf==7.1.1 httpx==0.28.1 pytest
+      - run: python scripts/fetch_rules.py
+      - run: python -m pytest -q
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t wsv:ci .
+      - name: smoke test, no network
+        run: |
+          set +e
+          docker run --rm --network none -v "$PWD/fixtures/valid:/work" wsv:ci validate . ; test $? -eq 0 || exit 1
+          docker run --rm --network none -v "$PWD/fixtures/invalid:/work" wsv:ci validate . ; test $? -eq 1 || exit 1
+          docker run --rm --network none wsv:ci licenses | grep -q "EUPL" || exit 1
+      - name: push to GHCR (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          V="${GITHUB_REF_NAME#v}"
+          IMG=ghcr.io/wsystemdev/einvoice-validator
+          docker tag wsv:ci $IMG:$V
+          docker push $IMG:$V
+          case "$V" in *-*) ;; *)
+            MINOR="${V%.*}"; MAJOR="${V%%.*}"
+            for t in $MINOR $MAJOR latest; do docker tag wsv:ci $IMG:$t; docker push $IMG:$t; done ;;
+          esac

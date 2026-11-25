@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wsystem-einvoice-validator"
+version = "0.1.0"
+description = "Offline EN 16931 / XRechnung validator for UBL, CII and ZUGFeRD/Factur-X e-invoices (W System, free edition)"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = ["lxml==6.1.3", "saxonche==13.1.1", "pypdf==7.1.1", "httpx==0.28.1"]
+
+[project.scripts]
+wsv = "wsystem_einvoice.cli:main"
+
+[tool.setuptools]
+packages = ["wsystem_einvoice", "wsystem_einvoice.engine"]
+
+[tool.setuptools.package-data]
+wsystem_einvoice = ["RULES.json"]
+"wsystem_einvoice.engine" = ["ENGINE_COMMIT", "ENGINE_SHA256.json"]

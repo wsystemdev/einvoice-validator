@@ -1,0 +1,126 @@
+{
+ "_about": "Expected results for rule pack 2026.11.1 (KoSIT XRechnung 3.0.2 config 2026-08-31, CEN EN 16931 1.3.16). Shared with the W System PHP SDK tests. errors = rule IDs that must appear; input_error = file must be rejected before validation.",
+ "files": {
+  "invalid/BASIC-WL_Einfach_fx.pdf": {
+   "errors": [
+    "BR-16",
+    "BR-CO-10",
+    "BR-S-08"
+   ],
+   "profile": "Factur-X/ZUGFeRD BASICWL",
+   "syntax": "cii",
+   "valid": false
+  },
+  "invalid/MINIMUM_Rechnung_fx.pdf": {
+   "errors": [
+    "BR-10",
+    "BR-11",
+    "BR-12",
+    "BR-16",
+    "BR-CO-10",
+    "BR-CO-13",
+    "BR-CO-14"
+   ],
+   "profile": "Factur-X/ZUGFeRD MINIMUM",
+   "syntax": "cii",
+   "valid": false
+  },
+  "invalid/cii-xrechnung-BR-CL-04-currency.xml": {
+   "errors": [
+    "BR-CL-04",
+    "BR-CO-15",
+    "PEPPOL-EN16931-R054"
+   ],
+   "profile": "XRechnung",
+   "syntax": "cii",
+   "valid": false
+  },
+  "invalid/not-an-invoice.xml": {
+   "input_error": true,
+   "valid": false
+  },
+  "invalid/ubl-xrechnung-BR-CO-16-totals.xml": {
+   "errors": [
+    "BR-CO-16"
+   ],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": false
+  },
+  "invalid/ubl-xrechnung-BR-DE-15-no-buyer-reference.xml": {
+   "errors": [
+    "BR-DE-15"
+   ],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": false
+  },
+  "invalid/ubl-xsd-unknown-element.xml": {
+   "errors": [
+    "XSD"
+   ],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": false
+  },
+  "invalid/xxe-doctype.xml": {
+   "input_error": true,
+   "valid": false
+  },
+  "valid/BASIC_B01_Einfach_fx.pdf": {
+   "errors": [],
+   "profile": "Factur-X/ZUGFeRD BASIC",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/EN16931_E05_Einfach_fx.pdf": {
+   "errors": [],
+   "profile": "EN 16931",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/EN16931_E10_Gutschrift_fx.pdf": {
+   "errors": [],
+   "profile": "EN 16931",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/EXTENDED_X07_Fremdwaehrung_fx.pdf": {
+   "errors": [],
+   "profile": "Factur-X/ZUGFeRD EXTENDED",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/KoSIT_01.01a-INVOICE_ubl.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": true
+  },
+  "valid/KoSIT_01.01a-INVOICE_uncefact.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/KoSIT_04.05a-INVOICE_uncefact.xml": {
+   "errors": [],
+   "profile": "XRechnung Extension",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/XRECHNUNG_Einfach_fx.pdf": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "cii",
+   "valid": true
+  },
+  "valid/ubl-xrechnung-wsystem.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": true
+  }
+ },
+ "rule_pack": "2026.11.1"
+}
