@@ -1,7 +1,7 @@
 # W System e-invoice validator, free edition: offline CLI. Rules are baked in at build time (checksum-pinned).
 FROM python:3.13-slim AS rules
 WORKDIR /src
-COPY wsystem_einvoice/RULES.json wsystem_einvoice/RULES.json
+COPY wsystem_einvoice wsystem_einvoice
 COPY scripts/fetch_rules.py scripts/fetch_rules.py
 RUN python scripts/fetch_rules.py /opt/wsystem/rules
 

@@ -79,3 +79,18 @@ def test_rules_and_licenses(capsys):
 
 def test_line_of_unresolvable():
     assert line_of(None, "/Q{x}a[1]") is None
+
+
+def test_fetch_rules_from_local_zip(capsys, tmp_path, monkeypatch):
+    import io, zipfile, hashlib
+    from wsystem_einvoice import fetch as F
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("scenarios.xml", "<x/>")
+    zp = tmp_path / "r.zip"
+    zp.write_bytes(buf.getvalue())
+    assert cli.main(["fetch-rules", str(tmp_path / "d"), "--zip", str(zp)]) == 1  # wrong checksum is refused
+    comp = dict(F.RULES["components"][0], sha256=hashlib.sha256(buf.getvalue()).hexdigest())
+    monkeypatch.setitem(F.RULES, "components", [comp] + F.RULES["components"][1:])
+    assert cli.main(["fetch-rules", str(tmp_path / "d"), "--zip", str(zp)]) == 0
+    assert (tmp_path / "d" / "2026-08-31" / ".ok").exists()

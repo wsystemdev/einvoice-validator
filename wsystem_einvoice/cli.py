@@ -2,7 +2,7 @@
 
     wsv validate [PATH|GLOB ...] [--rules auto|en16931|xrechnung] [--format text|json|github] [--fail-on-warnings]
                  [--summary FILE] [--json-out FILE]
-    wsv rules | wsv licenses | wsv version
+    wsv fetch-rules [DEST] | wsv rules | wsv licenses | wsv version
 
 Exit codes: 0 all files valid; 1 at least one invalid or unreadable invoice; 2 usage error / no files matched; 3 rule files missing.
 """
@@ -170,12 +170,18 @@ def main(argv=None) -> int:
     v.add_argument("--fail-on-warnings", action="store_true")
     v.add_argument("--summary", help="append a Markdown summary to this file (e.g. $GITHUB_STEP_SUMMARY)")
     v.add_argument("--json-out", help="also write the full JSON report here")
+    fr = sub.add_parser("fetch-rules", help="one-time download of the pinned official rule files (checksum-verified); not needed in the Docker image")
+    fr.add_argument("dest", nargs="?", default=None, help="target dir (default $WSV_RULES_DIR or ./rules)")
+    fr.add_argument("--zip", help="install from a local copy of the official zip (no network)")
     sub.add_parser("rules", help="show the installed rule pack")
     sub.add_parser("licenses", help="print licence and third-party notices")
     sub.add_parser("version")
     a = ap.parse_args(argv)
     if a.cmd == "validate":
         return cmd_validate(a)
+    if a.cmd == "fetch-rules":
+        from .fetch import fetch
+        return fetch(a.dest or os.environ.get("WSV_RULES_DIR") or "rules", a.zip)
     if a.cmd == "rules":
         return cmd_rules(a)
     if a.cmd == "licenses":

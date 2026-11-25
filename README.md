@@ -26,7 +26,8 @@ In GitHub Actions use [wsystemdev/einvoice-validate-action](https://github.com/w
 
 ```bash
 pip install .
-python scripts/fetch_rules.py        # one-time, checksum-pinned download of the official rule files into ./rules
+wsv fetch-rules rules              # one-time, checksum-pinned download of the official rule files
+export WSV_RULES_DIR=$PWD/rules
 wsv validate invoices/
 ```
 
