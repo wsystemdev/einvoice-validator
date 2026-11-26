@@ -53,6 +53,10 @@ untrusted sources.
 - File paths that contain a comma are no longer split into two arguments.
 - Limits and timeouts above, including worker recycle (the protections of the W System API 0.3.155.2 / 0.3.157.1).
 
+## Known issues
+
+Known issue (fixed in 0.1.2): the text and GitHub output formats don't print the Fix: hint; it's in the JSON output (explain.fix) and the API.
+
 ## Changes in 0.1.1.dev2
 
 - Severity levels of the official KoSIT XRechnung scenarios (`customLevel` in `scenarios.xml`) are now applied for standard
