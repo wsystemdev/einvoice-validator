@@ -8,7 +8,7 @@ checks the copy against ENGINE_SHA256.json, so edits to the vendored files are c
 """
 import hashlib, json, pathlib, subprocess, sys
 
-FILES = ["einvoice.py", "einvoice_sk.py", "einvoice_no.py", "einvoice_explain.py", "einvoice_de.py"]
+FILES = ["einvoice.py", "einvoice_sk.py", "einvoice_no.py", "einvoice_explain.py", "einvoice_de.py", "einvoice_worker.py"]
 DEST = pathlib.Path(__file__).resolve().parent.parent / "wsystem_einvoice" / "engine"
 
 

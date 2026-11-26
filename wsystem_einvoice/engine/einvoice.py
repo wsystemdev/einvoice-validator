@@ -27,6 +27,10 @@ XR_RETRIES = int(os.getenv("EINVOICE_XR_RETRIES", 3))
 XR_COOLDOWN = float(os.getenv("EINVOICE_XR_COOLDOWN", 30))
 ART_DIR = os.getenv("EINVOICE_ARTIFACTS", "/tmp/einvoice-artifacts")
 MAX_BYTES = int(os.getenv("EINVOICE_MAX_BYTES", 5 * 1024 * 1024))
+# 0.3.155.1 (PG-1): the rule engine (SaxonC) cost grows with lines and errors and holds the GIL. Inputs above these caps are
+# refused with 413 before any parsing; counted on the decoded text (UTF-8/UTF-16/declared encoding), streaming-cheap.
+MAX_LINES = int(os.getenv("EINVOICE_MAX_LINES", 2000))
+MAX_ELEMENTS = int(os.getenv("EINVOICE_MAX_ELEMENTS", 60000))
 
 NS = {
     "ubl_inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
@@ -86,6 +90,14 @@ _state: dict = {}
 
 class InputError(ValueError):
     pass
+
+
+class TooLarge(InputError):
+    """Input above a size / line / element cap. API answers 413 with error_code = .code (payload_too_large,
+    too_many_lines, too_many_elements)."""
+    def __init__(self, message: str, code: str = "payload_too_large", limit: int | None = None, found: int | None = None):
+        super().__init__(message)
+        self.code, self.limit, self.found = code, limit, found
 
 
 # ---------------------------------------------------------------- artefacts
@@ -180,6 +192,14 @@ def _xsd(doctype):
 
 
 def warm():
+    from . import einvoice_worker
+    if einvoice_worker.use_worker():
+        einvoice_worker.start()
+        return
+    warm_local()
+
+
+def warm_local():
     try:
         with _lock_run:
             for k in XSL:
@@ -202,7 +222,7 @@ def extract_xml(data: bytes) -> tuple[bytes, dict]:
     if not data:
         raise InputError("empty body: send the invoice XML or PDF as the request body")
     if len(data) > MAX_BYTES:
-        raise InputError(f"file too large (max {MAX_BYTES // 1024 // 1024} MB)")
+        raise TooLarge(f"file too large (max {MAX_BYTES // 1024 // 1024} MB)", "payload_too_large", MAX_BYTES, len(data))
     if data.lstrip()[:5] == b"%PDF-":
         from pypdf import PdfReader
         try:
@@ -217,17 +237,78 @@ def extract_xml(data: bytes) -> tuple[bytes, dict]:
         pick = next((n for n in files if n.lower() in PDF_XML_NAMES), None) or next((n for n in files if n.lower().endswith(".xml")), None)
         if not pick:
             raise InputError(f"PDF has embedded files but none is XML: {sorted(files)}")
-        return files[pick], {"container": "pdf", "embedded_file": pick}
+        xml = files[pick]
+        if len(xml) > MAX_BYTES:
+            raise TooLarge(f"embedded XML too large (max {MAX_BYTES // 1024 // 1024} MB)", "payload_too_large", MAX_BYTES, len(xml))
+        screen(xml)
+        return xml, {"container": "pdf", "embedded_file": pick}
+    screen(data)
     return data, {"container": "xml"}
+
+
+_ENC_DECL = re.compile(rb"""^<\?xml[^>]*?encoding\s*=\s*["']([A-Za-z0-9._-]+)["']""")
+_LINE_TAG = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?(?:InvoiceLine|CreditNoteLine|IncludedSupplyChainTradeLineItem)[\s/>]")
+_ROOT_START = re.compile(r"<[A-Za-z_]")
+
+
+def decode_text(xml: bytes) -> str:
+    """Decode XML bytes for the cheap pre-checks (BOM, UTF-16/32 without BOM, declared encoding; errors replaced)."""
+    for bom, enc in ((b"\xef\xbb\xbf", "utf-8"), (b"\xff\xfe\x00\x00", "utf-32-le"), (b"\x00\x00\xfe\xff", "utf-32-be"),
+                     (b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be")):
+        if xml.startswith(bom):
+            return xml[len(bom):].decode(enc, "replace")
+    head = xml[:4]
+    if head[:4] == b"<\x00\x00\x00":
+        return xml.decode("utf-32-le", "replace")
+    if head[:4] == b"\x00\x00\x00<":
+        return xml.decode("utf-32-be", "replace")
+    if head[:2] == b"<\x00":
+        return xml.decode("utf-16-le", "replace")
+    if head[:2] == b"\x00<":
+        return xml.decode("utf-16-be", "replace")
+    m = _ENC_DECL.match(xml.lstrip()[:200])
+    enc = m.group(1).decode("ascii").lower() if m else "utf-8"
+    try:
+        return xml.decode(enc, "replace")
+    except LookupError:
+        return xml.decode("utf-8", "replace")
+
+
+def screen(xml: bytes, text: str | None = None) -> None:
+    """Pre-checks before any XML parser runs: DOCTYPE/ENTITY in the prolog (after decoding, so UTF-16 is covered: PG-2)
+    and the line / element caps (PG-1). Raises InputError (400) or TooLarge (413)."""
+    t = decode_text(xml) if text is None else text
+    m = _ROOT_START.search(t)
+    prolog = t[:m.start()] if m else t
+    if "<!DOCTYPE" in prolog or "<!ENTITY" in prolog or "<!ENTITY" in t[:65536]:
+        raise InputError("DOCTYPE/ENTITY declarations are not allowed in e-invoices")
+    lines = len(_LINE_TAG.findall(t))
+    if lines > MAX_LINES:
+        raise TooLarge(f"too many invoice lines: {lines} (max {MAX_LINES} per invoice). Split it into several invoices.",
+                       "too_many_lines", MAX_LINES, lines)
+    elements = t.count("<") - t.count("</") - t.count("<?") - t.count("<!")
+    if elements > MAX_ELEMENTS:
+        raise TooLarge(f"too many XML elements: about {elements} (max {MAX_ELEMENTS}).", "too_many_elements", MAX_ELEMENTS, elements)
 
 
 def _parse(xml: bytes):
     if b"<!DOCTYPE" in xml[:2048] or b"<!ENTITY" in xml[:4096]:
         raise InputError("DOCTYPE/ENTITY declarations are not allowed in e-invoices")
+    t = decode_text(xml[:65536])
+    m = _ROOT_START.search(t)
+    if "<!DOCTYPE" in (t[:m.start()] if m else t) or "<!ENTITY" in t:
+        raise InputError("DOCTYPE/ENTITY declarations are not allowed in e-invoices")
     try:
-        return etree.fromstring(xml, _PARSER)
+        root = etree.fromstring(xml, _PARSER)
     except etree.XMLSyntaxError as e:
         raise InputError(f"not well-formed XML: {e}")
+    except (etree.LxmlError, ValueError) as e:
+        raise InputError(f"not readable XML: {e}")
+    if root is None:
+        raise InputError("not well-formed XML: empty document")
+    if root.getroottree().docinfo.doctype:
+        raise InputError("DOCTYPE/ENTITY declarations are not allowed in e-invoices")
+    return root
 
 
 def detect(root) -> dict:
@@ -365,8 +446,11 @@ def _svrl(out: str, ruleset: str) -> list[dict]:
 
 def _xsd_errors(root, doctype) -> list[dict]:
     s = _xsd(doctype)
-    if s.validate(etree.ElementTree(root)):
-        return []
+    try:
+        if s.validate(etree.ElementTree(root)):
+            return []
+    except etree.XMLSchemaValidateError as e:
+        raise InputError(f"the XML could not be checked against the schema: {e}")
     out = []
     for e in list(s.error_log)[:50]:
         msg = re.sub(r"\{[^}]+\}", "", e.message)
@@ -421,6 +505,16 @@ def kosit_levels(d: dict):
 
 
 def validate(data: bytes, rules: str = "auto") -> dict:
+    """Run the rule engine. In the API process this goes to a separate worker process with a hard wall-clock timeout
+    (einvoice_worker, 0.3.155.1 PG-1); the caps and DOCTYPE checks run here first so oversized input never reaches it."""
+    from . import einvoice_worker
+    if einvoice_worker.use_worker():
+        extract_xml(data)  # cheap pre-checks (size, DOCTYPE, line / element caps) before the worker sees anything
+        return einvoice_worker.call("_validate_local", data, rules)
+    return _validate_local(data, rules)
+
+
+def _validate_local(data: bytes, rules: str = "auto") -> dict:
     t0 = time.time()
     xml, meta = extract_xml(data)
     root = _parse(xml)

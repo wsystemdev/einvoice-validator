@@ -22,6 +22,36 @@ INVALID  invoices/2026-0042.xml  (XRechnung, UBL, 1 errors, 0 warnings)
 
 In GitHub Actions use [wsystemdev/einvoice-validate-action](https://github.com/wsystemdev/einvoice-validate-action).
 
+## Limits and timeouts (0.1.1)
+
+The validator applies the same protections as the W System API, with the same defaults. Every file is checked against
+size, line and element caps before it is parsed, and the rule engine runs in a separate worker process that is stopped
+after a time limit. A file that hits a limit is reported as `not checked` with an `error_code` (exit code 1); the next
+file is checked normally. Set the limits with environment variables, e.g. `docker run -e EINVOICE_MAX_LINES=5000 ...`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EINVOICE_MAX_BYTES` | `5242880` (5 MB) | Maximum file size, and maximum size of the XML embedded in a PDF (`payload_too_large`) |
+| `EINVOICE_MAX_LINES` | `2000` | Maximum invoice lines (`too_many_lines`) |
+| `EINVOICE_MAX_ELEMENTS` | `60000` | Maximum XML elements (`too_many_elements`) |
+| `EINVOICE_TIMEOUT_S` | `20` | Time limit for the rule engine per file, in seconds (`validation_timeout`) |
+| `EINVOICE_REQUEST_BUDGET_S` | `30` | Total time per file including waiting for the worker, in seconds |
+| `EINVOICE_WORKER` | `1` | `0` runs the rule engine in-process: faster start, but no time limit |
+| `EINVOICE_WORKER_READY_S` | `120` | Maximum start-up time of the worker (it compiles the rule sets once) |
+
+Raising the caps lets bigger invoices through but makes each check slower; keep a time limit when you validate files from
+untrusted sources.
+
+## Changes in 0.1.1
+
+- Severity levels of the official KoSIT XRechnung scenarios (`customLevel` in `scenarios.xml`) are now applied for standard
+  XRechnung and XRechnung CVD, as KoSIT does, not only for XRechnung Extension. The official CVD samples (BR-CL-13) and unit
+  codes outside the BR-CL-23 list in standard XRechnung are now accepted with a warning.
+- **Stricter, matching KoSIT:** in standard XRechnung, CII-SR-452, CII-SR-453, CII-SR-454, CII-SR-465, CII-SR-466 and (UBL invoices)
+  UBL-CR-646 now count as errors, so files that break them now fail. Example: Mustang's `XRECHNUNG_Einfach_fx.pdf` (two BT-41
+  elements, CII-SR-465), which the KoSIT validator rejects too.
+- Limits and timeouts above (the protections of the W System API 0.3.155.1).
+
 ## Without Docker
 
 ```bash
