@@ -8,17 +8,61 @@ a persistent worker process (python -m vatcheck.einvoice_worker) over a pipe; th
 Env: EINVOICE_WORKER=0 runs in-process (tests / local tools), EINVOICE_WORKERS (default 1, Render 512 MB: one warm worker
 is about 250 MB and the API process no longer loads SaxonC), EINVOICE_TIMEOUT_S (default 20, per engine call),
 EINVOICE_REQUEST_BUDGET_S (default 30, whole request incl. queue wait; set by the API per request), EINVOICE_QUEUE_WAIT_S
-(default 15, max wait for a free worker).
+(default 15, max wait for a free worker), EINVOICE_WORKER_RECYCLE_MB (default 300, 0 = never: a worker above it is replaced after its reply),
+EINVOICE_WORKER_RECYCLE_MARGIN_MB (40) and EINVOICE_WORKER_RECYCLE_MIN_S (30) are the anti-thrash guards.
 Errors: ValidationTimeout (API: 422 validation_timeout), Busy (API: 503 busy + Retry-After), WorkerCrashed (API: 503).
 """
 from __future__ import annotations
-import contextvars, os, pickle, queue, select, struct, subprocess, sys, threading, time
+import contextvars, logging, os, pickle, queue, select, struct, subprocess, sys, threading, time
 
-TIMEOUT = float(os.getenv("EINVOICE_TIMEOUT_S", 20))
-BUDGET = float(os.getenv("EINVOICE_REQUEST_BUDGET_S", 30))
-QUEUE_WAIT = float(os.getenv("EINVOICE_QUEUE_WAIT_S", 15))
-WORKERS = max(1, int(os.getenv("EINVOICE_WORKERS", 1)))
-READY_WAIT = float(os.getenv("EINVOICE_WORKER_READY_S", 120))
+log = logging.getLogger("vatcheck.einvoice_worker")
+
+
+def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+    """int(env) or the default. An unset, empty or unparsable value logs a warning and uses the default instead of crashing the import."""
+    default = int(default)
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        if raw is not None:
+            log.warning("%s is empty; using the default %s", name, default)
+        return default
+    try:
+        v = int(raw.strip(), 10)
+        if minimum is not None and v < minimum:
+            raise ValueError(raw)
+    except ValueError:
+        log.warning("%s=%r is not a valid integer; using the default %s", name, raw, default)
+        return default
+    return v
+
+
+def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+    """float(env) or the default. An unset, empty, unparsable, non-finite or below-minimum value logs a warning and uses the default
+    instead of crashing the import (and with it the whole API)."""
+    default = float(default)
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        if raw is not None:
+            log.warning("%s is empty; using the default %s", name, default)
+        return default
+    try:
+        v = float(raw)
+        if v != v or v in (float("inf"), float("-inf")) or (minimum is not None and v < minimum):
+            raise ValueError(raw)
+    except ValueError:
+        log.warning("%s=%r is not a valid number; using the default %s", name, raw, default)
+        return default
+    return v
+
+
+TIMEOUT = _env_float("EINVOICE_TIMEOUT_S", 20)
+BUDGET = _env_float("EINVOICE_REQUEST_BUDGET_S", 30)
+QUEUE_WAIT = _env_float("EINVOICE_QUEUE_WAIT_S", 15)
+WORKERS = max(1, _env_int("EINVOICE_WORKERS", 1))
+READY_WAIT = _env_float("EINVOICE_WORKER_READY_S", 120)
+RECYCLE_MB = _env_float("EINVOICE_WORKER_RECYCLE_MB", 300)   # 0 = never
+RECYCLE_MARGIN_MB = _env_float("EINVOICE_WORKER_RECYCLE_MARGIN_MB", 40, 0)   # anti-thrash: never recycle below (fresh worker RSS + margin)
+RECYCLE_MIN_S = _env_float("EINVOICE_WORKER_RECYCLE_MIN_S", 30, 0)   # anti-thrash: at most one recycle per worker per this many seconds
 IN_WORKER = os.getenv("_EINVOICE_IN_WORKER") == "1"
 
 # Package-relative (0.3.157.1): the same file runs as vatcheck.einvoice_worker (API) and as wsystem_einvoice.engine.einvoice_worker
@@ -41,6 +85,15 @@ class Busy(Exception):
 
 class WorkerCrashed(Exception):
     """The worker process died during the call (e.g. out of memory); it is restarted."""
+
+
+def _rss_mb(pid: int) -> float | None:
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            kb = next((int(l.split()[1]) for l in f if l.startswith("VmRSS:")), 0)
+    except (OSError, ValueError):
+        return None
+    return kb / 1024
 
 
 def use_worker() -> bool:
@@ -144,6 +197,9 @@ class _Worker:
     def __init__(self):
         self.p: subprocess.Popen | None = None
         self.ready = False
+        self.floor_mb = 0.0                       # RSS of the freshly started worker once ready (the recycle threshold never goes below floor + margin)
+        self.last_recycle: float | None = None    # monotonic time of the last recycle
+        self.recycles = 0
 
     def start(self) -> None:
         env = dict(os.environ, _EINVOICE_IN_WORKER="1", EINVOICE_WORKER="0")
@@ -188,6 +244,7 @@ class _Worker:
                 self.restart()
                 raise WorkerCrashed("the validation worker did not start")
             self.ready = msg[0] == "ready"
+            self.floor_mb = _rss_mb(self.p.pid) or 0.0
         until = min(time.monotonic() + TIMEOUT, dl)
         if until - time.monotonic() <= 0.05:
             raise ValidationTimeout("validation took too long and was stopped")
@@ -200,9 +257,33 @@ class _Worker:
         except (EOFError, OSError, BrokenPipeError):
             self.restart()
             raise WorkerCrashed("the validation worker stopped during the check")
+        self._maybe_recycle()
         if st == "ok":
             return val
         raise _unpack_exc(val)
+
+    def _maybe_recycle(self) -> None:
+        """The worker's heap grows with the biggest invoice it has seen (~0.15 MB per line) and Python rarely gives it back (a 1900-line file leaves it at ~480 MB).
+        After a reply, a worker above RECYCLE_MB is replaced by a fresh one (~240 MB, warming in the background), so one big file does not pin memory.
+        Safe by construction: the reply is already in hand and this worker is out of the pool (nobody else is using it), so no request is dropped; kill() waits
+        for the old process before start() spawns the new one (no orphan, no two engines in memory). Anti-thrash: the threshold is never below the fresh
+        worker's own RSS + RECYCLE_MARGIN_MB, and a worker is recycled at most once per RECYCLE_MIN_S (it is checked again after the next reply).
+        A failure here never fails the request (the next call starts a worker lazily)."""
+        if RECYCLE_MB <= 0 or self.p is None:
+            return
+        mb = _rss_mb(self.p.pid)
+        if mb is None or mb <= max(RECYCLE_MB, self.floor_mb + RECYCLE_MARGIN_MB):
+            return
+        now = time.monotonic()
+        if self.last_recycle is not None and now - self.last_recycle < RECYCLE_MIN_S:
+            return
+        self.last_recycle = now
+        try:
+            self.restart()
+            self.recycles += 1
+            log.info("einvoice worker recycled at %.0f MB (limit %.0f MB)", mb, RECYCLE_MB)
+        except Exception:  # noqa: BLE001
+            log.exception("einvoice worker recycle failed; it is started on the next call")
 
 
 _lock = threading.Lock()

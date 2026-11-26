@@ -22,7 +22,7 @@ INVALID  invoices/2026-0042.xml  (XRechnung, UBL, 1 errors, 0 warnings)
 
 In GitHub Actions use [wsystemdev/einvoice-validate-action](https://github.com/wsystemdev/einvoice-validate-action).
 
-## Limits and timeouts (0.1.1)
+## Limits and timeouts (0.1.1.rc1)
 
 The validator applies the same protections as the W System API, with the same defaults. Every file is checked against
 size, line and element caps before it is parsed, and the rule engine runs in a separate worker process that is stopped
@@ -38,11 +38,22 @@ file is checked normally. Set the limits with environment variables, e.g. `docke
 | `EINVOICE_REQUEST_BUDGET_S` | `30` | Total time per file including waiting for the worker, in seconds |
 | `EINVOICE_WORKER` | `1` | `0` runs the rule engine in-process: faster start, but no time limit |
 | `EINVOICE_WORKER_READY_S` | `120` | Maximum start-up time of the worker (it compiles the rule sets once) |
+| `EINVOICE_WORKER_RECYCLE_MB` | `300` | After a reply, a worker above this RSS (MiB) is replaced (0 = never) |
 
 Raising the caps lets bigger invoices through but makes each check slower; keep a time limit when you validate files from
 untrusted sources.
 
-## Changes in 0.1.1
+## Changes in 0.1.1.rc1
+
+- Engine and worker resynced from the W System API 0.3.157.1 (`6abc6da`): KoSIT standard/CVD severity levels, the 0.3.155.2
+  worker recycle, the CII-SR-465/466 fix hint, safe env parsing, and the 0.3.157 PDF extract wording.
+- **Fix hint:** in standard XRechnung, CII-SR-465 (seller contact) and CII-SR-466 (buyer contact) now say
+  "In XRechnung, use either a person name or a department in the contact, not both."
+- Non-numeric `EINVOICE_*` env values (e.g. `EINVOICE_MAX_LINES=abc`) fall back to the default with a warning, instead of a traceback.
+- File paths that contain a comma are no longer split into two arguments.
+- Limits and timeouts above, including worker recycle (the protections of the W System API 0.3.155.2 / 0.3.157.1).
+
+## Changes in 0.1.1.dev2
 
 - Severity levels of the official KoSIT XRechnung scenarios (`customLevel` in `scenarios.xml`) are now applied for standard
   XRechnung and XRechnung CVD, as KoSIT does, not only for XRechnung Extension. The official CVD samples (BR-CL-13) and unit
@@ -50,7 +61,7 @@ untrusted sources.
 - **Stricter, matching KoSIT:** in standard XRechnung, CII-SR-452, CII-SR-453, CII-SR-454, CII-SR-465, CII-SR-466 and (UBL invoices)
   UBL-CR-646 now count as errors, so files that break them now fail. Example: Mustang's `XRECHNUNG_Einfach_fx.pdf` (two BT-41
   elements, CII-SR-465), which the KoSIT validator rejects too.
-- Limits and timeouts above (the protections of the W System API 0.3.155.1).
+- Limits and timeouts (the protections of the W System API 0.3.155.1).
 
 ## Without Docker
 

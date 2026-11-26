@@ -20,7 +20,8 @@ EXTS = (".xml", ".pdf")
 def _expand(patterns: list[str]) -> list[str]:
     seen, out = set(), []
     for raw in patterns:
-        for p in [x.strip() for x in raw.replace(",", "\n").splitlines() if x.strip()]:
+        p = raw.strip()
+        if p:
             if os.path.isdir(p):
                 hits = [str(f) for f in sorted(pathlib.Path(p).rglob("*")) if f.suffix.lower() in EXTS and f.is_file()]
             elif any(c in p for c in "*?["):

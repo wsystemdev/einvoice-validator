@@ -25,7 +25,7 @@ BT = {
     "BT-44": ("Buyer name", "buyer.name"), "BT-46": ("Buyer identifier", "buyer.company_id"),
     "BT-47": ("Buyer legal registration ID", "buyer.company_id"), "BT-48": ("Buyer VAT ID", "buyer.vat_id"),
     "BT-49": ("Buyer electronic address (Peppol ID)", "buyer.endpoint_id"), "BT-50": ("Buyer street", "buyer.street"),
-    "BT-52": ("Buyer city", "buyer.city"), "BT-53": ("Buyer postal code", "buyer.postal_code"), "BT-55": ("Buyer country code", "buyer.country"),
+    "BT-52": ("Buyer city", "buyer.city"), "BT-53": ("Buyer postal code", "buyer.postal_code"), "BT-55": ("Buyer country code", "buyer.country"), "BT-56": ("Buyer contact name", "buyer.contact_name"),
     "BT-63": ("Seller tax representative VAT ID", None), "BT-72": ("Delivery date", "delivery_date"),
     "BT-77": ("Deliver-to city", None), "BT-78": ("Deliver-to postal code", None), "BT-80": ("Deliver-to country code", None),
     "BT-81": ("Payment means code", "payment.means_code"), "BT-83": ("Payment reference", "payment.reference"),
@@ -127,6 +127,8 @@ RULES = {
     "BR-DE-23-a": ("A credit transfer is declared but the account details are missing.", ["BG-17"], "Add payment.iban."),
     "BR-DE-26": ("A corrected invoice (type 384) must refer to the invoice it corrects.", ["BT-25"], "Add preceding_invoice with the original invoice number."),
     "BR-DE-TMP-32": ("XRechnung expects a delivery date or invoicing period.", ["BT-72"], "Add delivery_date (or an invoicing period)."),
+    "CII-SR-465": ("The seller contact has both a person name and a department name; XRechnung allows only one.", ["BT-41"], "In XRechnung, use either a person name or a department in the contact, not both."),
+    "CII-SR-466": ("The buyer contact has both a person name and a department name; XRechnung allows only one.", ["BT-56"], "In XRechnung, use either a person name or a department in the contact, not both."),
     "PEPPOL-EN16931-R010": ("The buyer's electronic address (Peppol ID) is missing.", ["BT-49"], "Add buyer.endpoint_id and endpoint_scheme, or a VAT ID W System can derive it from (look it up with GET /einvoice/route)."),
     "PEPPOL-EN16931-R020": ("The seller's electronic address (Peppol ID) is missing.", ["BT-34"], "Add seller.endpoint_id and endpoint_scheme."),
 }

@@ -9,6 +9,7 @@ Peppol BIS 3 rules are deliberately NOT run: OpenPeppol has not given a licence 
 allows use in a paid hosted service (see /workspace/growth/EINVOICE_LICENCES.md).
 """
 from __future__ import annotations
+import logging
 import io, os, re, threading, zipfile, hashlib, time
 from decimal import Decimal, ROUND_HALF_UP
 from xml.sax.saxutils import escape
@@ -23,14 +24,52 @@ XR_URL = ("https://github.com/itplr-kosit/validator-configuration-xrechnung/rele
           f"v{XR_VERSION}/xrechnung-3.0.2-validator-configuration-{XR_VERSION}.zip")
 # Pinned checksum of the official release asset (env override for a new XR_VERSION).
 XR_SHA256 = os.getenv("EINVOICE_XR_SHA256", "2530cd107c414511c5d0462ec10f886910395abfca820db82e83d70bf01221a8")
-XR_RETRIES = int(os.getenv("EINVOICE_XR_RETRIES", 3))
-XR_COOLDOWN = float(os.getenv("EINVOICE_XR_COOLDOWN", 30))
 ART_DIR = os.getenv("EINVOICE_ARTIFACTS", "/tmp/einvoice-artifacts")
-MAX_BYTES = int(os.getenv("EINVOICE_MAX_BYTES", 5 * 1024 * 1024))
+
+def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+    """int(env) or the default. An unset, empty or unparsable value logs a warning and uses the default instead of crashing the import."""
+    default = int(default)
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        if raw is not None:
+            logging.getLogger("vatcheck.einvoice").warning("%s is empty; using the default %s", name, default)
+        return default
+    try:
+        v = int(raw.strip(), 10)
+        if minimum is not None and v < minimum:
+            raise ValueError(raw)
+    except ValueError:
+        logging.getLogger("vatcheck.einvoice").warning("%s=%r is not a valid integer; using the default %s", name, raw, default)
+        return default
+    return v
+
+
+def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+    """float(env) or the default. An unset, empty, unparsable, non-finite or below-minimum value logs a warning and uses the default."""
+    default = float(default)
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        if raw is not None:
+            logging.getLogger("vatcheck.einvoice").warning("%s is empty; using the default %s", name, default)
+        return default
+    try:
+        v = float(raw)
+        if v != v or v in (float("inf"), float("-inf")) or (minimum is not None and v < minimum):
+            raise ValueError(raw)
+    except ValueError:
+        logging.getLogger("vatcheck.einvoice").warning("%s=%r is not a valid number; using the default %s", name, raw, default)
+        return default
+    return v
+
+
+XR_RETRIES = _env_int("EINVOICE_XR_RETRIES", 3)
+XR_COOLDOWN = _env_float("EINVOICE_XR_COOLDOWN", 30)
 # 0.3.155.1 (PG-1): the rule engine (SaxonC) cost grows with lines and errors and holds the GIL. Inputs above these caps are
 # refused with 413 before any parsing; counted on the decoded text (UTF-8/UTF-16/declared encoding), streaming-cheap.
-MAX_LINES = int(os.getenv("EINVOICE_MAX_LINES", 2000))
-MAX_ELEMENTS = int(os.getenv("EINVOICE_MAX_ELEMENTS", 60000))
+# Non-numeric EINVOICE_* values used to crash the import; they now fall back to the default with a warning.
+MAX_BYTES = _env_int("EINVOICE_MAX_BYTES", 5 * 1024 * 1024)
+MAX_LINES = _env_int("EINVOICE_MAX_LINES", 2000)
+MAX_ELEMENTS = _env_int("EINVOICE_MAX_ELEMENTS", 60000)
 
 NS = {
     "ubl_inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
@@ -89,7 +128,14 @@ _state: dict = {}
 
 
 class InputError(ValueError):
-    pass
+    """Unreadable / unacceptable input (HTTP 400 bad_input). `code` is an optional stable machine-readable reason (error_code)."""
+    def __init__(self, msg="", code=None):
+        super().__init__(msg)
+        self.code = code
+
+
+PDF_UNREADABLE = ("The PDF could not be read: it is damaged, password-protected or not a valid PDF file. "
+                  "Send the original ZUGFeRD / Factur-X hybrid PDF, or the invoice XML.")
 
 
 class TooLarge(InputError):
@@ -217,26 +263,38 @@ _PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=Fals
 PDF_XML_NAMES = ("factur-x.xml", "zugferd-invoice.xml", "xrechnung.xml", "zugferd_invoice.xml", "order-x.xml")
 
 
+def is_pdf(data: bytes) -> bool:
+    """PDF magic: %PDF- at the start, or anywhere in the first 1 KB (the PDF spec lets a file carry junk before the header; pypdf
+    reads those). A body that starts with '<' (XML) is never a PDF."""
+    if not data:
+        return False
+    head = data[:1024]
+    if b"%PDF-" not in head:
+        return False
+    return data.lstrip(b"\xef\xbb\xbf \t\r\n")[:1] != b"<"
+
+
 def extract_xml(data: bytes) -> tuple[bytes, dict]:
     """Return (xml_bytes, meta). Accepts raw XML or a PDF with an embedded e-invoice (ZUGFeRD / Factur-X)."""
     if not data:
         raise InputError("empty body: send the invoice XML or PDF as the request body")
     if len(data) > MAX_BYTES:
         raise TooLarge(f"file too large (max {MAX_BYTES // 1024 // 1024} MB)", "payload_too_large", MAX_BYTES, len(data))
-    if data.lstrip()[:5] == b"%PDF-":
+    if is_pdf(data):
         from pypdf import PdfReader
         try:
             r = PdfReader(io.BytesIO(data))
             files = {}
             for name, contents in (r.attachments or {}).items():
                 files[name] = contents[0] if isinstance(contents, list) else contents
-        except Exception as e:
-            raise InputError(f"could not read PDF: {e}")
+        except Exception as e:  # never put the parser's exception text in the API answer; the detail goes to the server log only
+            logging.getLogger("vatcheck.einvoice").warning("PDF read failed: %s: %s", type(e).__name__, str(e)[:200].replace("\n", " "))
+            raise InputError(PDF_UNREADABLE, code="unreadable_pdf")
         if not files:
-            raise InputError("PDF has no embedded files: this is not a ZUGFeRD/Factur-X/XRechnung hybrid invoice")
+            raise InputError("PDF has no embedded files: this is not a ZUGFeRD/Factur-X/XRechnung hybrid invoice", code="pdf_no_embedded_files")
         pick = next((n for n in files if n.lower() in PDF_XML_NAMES), None) or next((n for n in files if n.lower().endswith(".xml")), None)
         if not pick:
-            raise InputError(f"PDF has embedded files but none is XML: {sorted(files)}")
+            raise InputError(f"PDF has embedded files but none is XML: {sorted(files)}", code="pdf_no_xml_attachment")
         xml = files[pick]
         if len(xml) > MAX_BYTES:
             raise TooLarge(f"embedded XML too large (max {MAX_BYTES // 1024 // 1024} MB)", "payload_too_large", MAX_BYTES, len(xml))

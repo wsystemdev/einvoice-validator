@@ -41,12 +41,23 @@ def test_not_an_invoice_annotated(capsys):
     assert code == 1 and "title=not an e-invoice" in out
 
 
-def test_glob_comma_and_json(capsys, tmp_path):
+def test_glob_and_json(capsys, tmp_path):
     j = tmp_path / "r.json"
-    code, out, _ = run(capsys, "validate", f"{FX}/valid/*.pdf, {FX}/valid/ubl-xrechnung-wsystem.xml", "--format", "json", "--json-out", str(j))
+    code, out, _ = run(capsys, "validate", f"{FX}/valid/*.pdf", str(FX / "valid" / "ubl-xrechnung-wsystem.xml"),
+                       "--format", "json", "--json-out", str(j))
     rep = json.loads(out)
     assert code == 0 and rep["checked"] == 5 and rep["failed"] == 0
     assert json.loads(j.read_text())["rule_pack"] == "2026.11.1"
+
+
+def test_path_with_comma_is_one_file(capsys, tmp_path):
+    """File arguments are not split on commas (a path like 'FT G2G_TD01 con Allegato, Bonifico e Split Payment.xml' is one file)."""
+    src = FX / "valid" / "ubl-xrechnung-wsystem.xml"
+    dest = tmp_path / "FT G2G_TD01 con Allegato, Bonifico e Split Payment.xml"
+    dest.write_bytes(src.read_bytes())
+    code, out, err = run(capsys, "validate", str(dest), "--format", "json")
+    rep = json.loads(out)
+    assert code == 0 and rep["checked"] == 1 and rep["files"][0]["file"].endswith(dest.name)
 
 
 def test_fail_on_warnings(capsys):

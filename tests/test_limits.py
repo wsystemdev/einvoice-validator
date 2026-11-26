@@ -21,6 +21,7 @@ def test_defaults_match_the_api():
     from wsystem_einvoice.engine import einvoice_worker as W
     assert (E.MAX_BYTES, E.MAX_LINES, E.MAX_ELEMENTS) == (5 * 1024 * 1024, 2000, 60000)
     assert (W.TIMEOUT, W.BUDGET, W.WORKERS) == (20.0, 30.0, 1)
+    assert (W.RECYCLE_MB, W.RECYCLE_MARGIN_MB, W.RECYCLE_MIN_S) == (300.0, 40.0, 30.0)
 
 
 def test_worker_is_used_by_default_and_runs_the_vendored_module():
@@ -71,3 +72,10 @@ def test_timeout_kills_the_engine_and_the_next_file_still_works(tmp_path):
 def test_in_process_mode_has_no_timeout(tmp_path):
     code, rep = run(str(VALID), EINVOICE_WORKER=0, EINVOICE_TIMEOUT_S="0.001")
     assert code == 0 and rep["files"][0]["valid"] is True
+
+
+def test_non_numeric_env_falls_back_to_the_default(tmp_path):
+    """EINVOICE_MAX_LINES=abc must not crash; the default cap is used and the file is checked."""
+    code, rep = run(str(VALID), EINVOICE_MAX_LINES="abc", EINVOICE_MAX_ELEMENTS="nope")
+    assert code == 0 and rep["files"][0]["valid"] is True
+
