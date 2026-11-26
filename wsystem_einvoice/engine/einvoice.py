@@ -54,6 +54,25 @@ XRECHNUNG_EXT_LEVELS = {
             "BR-CL-11": "information", "BR-CL-25": "information", "BR-CL-26": "information", "BR-CO-16": "information",
             "UBL-CR-470": "information", "UBL-CR-646": "information"},
 }
+# 0.3.157.1: the same severity overrides for the official KoSIT scenarios "EN16931 XRechnung" (standard) and "EN16931 XRechnung CVD"
+# (config 3.0.2 / 2026-08-31). KoSIT selects the scenario from the exact CustomizationID: standard XRECHNUNG_ID or XRECHNUNG_CVD_ID.
+# Levels are per document type because the scenarios differ (UBL-CR-646 applies to UBL Invoice and, for CVD, CreditNote only).
+# An "error" level can also escalate a rule that the Schematron reports as a warning. tests/test_einvoice_corpus.py checks
+# these tables against the downloaded scenarios.xml.
+XRECHNUNG_CVD_ID = XRECHNUNG_ID + "#compliant#urn:xeinkauf.de:kosit:xrechnung:cvd_0.9"
+_CII_STD = {"BR-CL-23": "warning", "BR-CL-21": "warning",
+            "CII-SR-452": "error", "CII-SR-453": "error", "CII-SR-454": "error", "CII-SR-465": "error", "CII-SR-466": "error",
+            "CII-SR-475": "information", "CII-SR-476": "information"}
+XRECHNUNG_STD_LEVELS = {
+    "ubl_inv": {"BR-CL-23": "warning", "BR-CL-21": "warning", "UBL-CR-646": "error"},
+    "ubl_cn": {"BR-CL-23": "warning", "BR-CL-21": "warning"},
+    "cii": dict(_CII_STD),
+}
+XRECHNUNG_CVD_LEVELS = {
+    "ubl_inv": {"BR-CL-13": "information", "BR-CL-23": "warning", "BR-CL-21": "warning", "UBL-CR-646": "error"},
+    "ubl_cn": {"BR-CL-13": "information", "BR-CL-23": "warning", "BR-CL-21": "warning", "UBL-CR-646": "error"},
+    "cii": {"BR-CL-13": "information", **_CII_STD},
+}
 PEPPOL_ID = "urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0"
 EN16931_ID = "urn:cen.eu:en16931:2017"
 DISCLAIMER = ("Technical check against the official EN 16931 / XRechnung rule sets. A technically valid file is not tax or legal advice. "
@@ -367,17 +386,38 @@ def _extended_relax(i: dict) -> dict:
     return i
 
 
-def _xrechnung_ext_level(i: dict, levels: dict) -> dict:
-    """Apply the KoSIT XRechnung Extension scenario severity for one EN16931/XRechnung schematron issue."""
+def _xrechnung_ext_level(i: dict, levels: dict, scenario: str = "Extension") -> dict:
+    """Apply the KoSIT scenario severity (customLevel) for one EN16931/XRechnung schematron issue.
+    scenario names the KoSIT scenario for the note: "Extension" (default), "XRechnung" or "XRechnung CVD"."""
     lvl = levels.get(i.get("rule_id") or "")
     if not lvl or i.get("ruleset") not in ("EN16931", "XRechnung"):
         return i
     sev = "error" if lvl == "error" else "warning"
     if sev == i.get("severity"):
         return i
-    note = ("Allowed in XRechnung Extension (KoSIT Extension scenario level: " + lvl + "); an error for standard XRechnung / EN 16931."
-            if sev == "warning" else "An error in XRechnung Extension (KoSIT Extension scenario level: error).")
+    if scenario == "Extension":
+        note = ("Allowed in XRechnung Extension (KoSIT Extension scenario level: " + lvl + "); an error for standard XRechnung / EN 16931."
+                if sev == "warning" else "An error in XRechnung Extension (KoSIT Extension scenario level: error).")
+    else:
+        note = (f"Reported as {lvl} by the official KoSIT {scenario} scenario (customLevel), not as an error; the file is not rejected for it."
+                if sev == "warning" else f"An error in the official KoSIT {scenario} scenario (customLevel: error).")
     return dict(i, severity=sev, profile_note=note)
+
+
+def kosit_levels(d: dict):
+    """(scenario name, severity table) of the official KoSIT scenario that matches this CustomizationID, or None."""
+    cid = d["customization_id"]
+    if d["syntax"] == "cii":
+        dt = "cii"
+    else:
+        dt = d["document_type"]
+    if d["profile"] == "XRechnung Extension":
+        return "Extension", XRECHNUNG_EXT_LEVELS[d["syntax"]]
+    if cid == XRECHNUNG_ID:
+        return "XRechnung", XRECHNUNG_STD_LEVELS[dt]
+    if cid == XRECHNUNG_CVD_ID:
+        return "XRechnung CVD", XRECHNUNG_CVD_LEVELS[dt]
+    return None
 
 
 def validate(data: bytes, rules: str = "auto") -> dict:
@@ -398,8 +438,9 @@ def validate(data: bytes, rules: str = "auto") -> dict:
             issues += _svrl(_xslt(d["syntax"], rs).transform_to_string(xdm_node=node), rs)
     if d["syntax"] == "cii" and "extended" in d["customization_id"].lower():
         issues = [_extended_relax(i) for i in issues]
-    if d["profile"] == "XRechnung Extension" and "XRechnung" in sets:
-        issues = [_xrechnung_ext_level(i, XRECHNUNG_EXT_LEVELS[d["syntax"]]) for i in issues]
+    kl = kosit_levels(d) if "XRechnung" in sets else None
+    if kl:
+        issues = [_xrechnung_ext_level(i, kl[1], kl[0]) for i in issues]
     sk_issues, sk = einvoice_sk.check(root, d["syntax"], NS)
     issues += sk_issues
     no_issues, no = einvoice_no.check(root, d["syntax"], NS)

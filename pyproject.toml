@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wsystem-einvoice-validator"
-version = "0.1.0"
+version = "0.1.1.dev1"
 description = "Offline EN 16931 / XRechnung validator for UBL, CII and ZUGFeRD/Factur-X e-invoices (W System, free edition)"
 readme = "README.md"
 license = "Apache-2.0"

@@ -25,6 +25,14 @@
    "syntax": "cii",
    "valid": false
   },
+  "invalid/XRECHNUNG_Einfach_fx.pdf": {
+   "errors": [
+    "CII-SR-465"
+   ],
+   "profile": "XRechnung",
+   "syntax": "cii",
+   "valid": false
+  },
   "invalid/cii-xrechnung-BR-CL-04-currency.xml": {
    "errors": [
     "BR-CL-04",
@@ -103,16 +111,34 @@
    "syntax": "cii",
    "valid": true
   },
+  "valid/KoSIT_02.01a-cvd_INVOICE_ubl.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "ubl",
+   "valid": true
+  },
+  "valid/KoSIT_02.01a-cvd_INVOICE_uncefact.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "cii",
+   "valid": true
+  },
   "valid/KoSIT_04.05a-INVOICE_uncefact.xml": {
    "errors": [],
    "profile": "XRechnung Extension",
    "syntax": "cii",
    "valid": true
   },
-  "valid/XRECHNUNG_Einfach_fx.pdf": {
+  "valid/cii-xrechnung-BR-CL-23-unit-code-warning.xml": {
    "errors": [],
    "profile": "XRechnung",
    "syntax": "cii",
+   "valid": true
+  },
+  "valid/ubl-xrechnung-BR-CL-23-unit-code-warning.xml": {
+   "errors": [],
+   "profile": "XRechnung",
+   "syntax": "ubl",
    "valid": true
   },
   "valid/ubl-xrechnung-wsystem.xml": {

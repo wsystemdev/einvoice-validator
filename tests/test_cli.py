@@ -45,7 +45,7 @@ def test_glob_comma_and_json(capsys, tmp_path):
     j = tmp_path / "r.json"
     code, out, _ = run(capsys, "validate", f"{FX}/valid/*.pdf, {FX}/valid/ubl-xrechnung-wsystem.xml", "--format", "json", "--json-out", str(j))
     rep = json.loads(out)
-    assert code == 0 and rep["checked"] == 6 and rep["failed"] == 0
+    assert code == 0 and rep["checked"] == 5 and rep["failed"] == 0
     assert json.loads(j.read_text())["rule_pack"] == "2026.11.1"
 
 
